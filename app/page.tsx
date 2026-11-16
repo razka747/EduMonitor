@@ -867,10 +867,12 @@ export default function LoginPage() {
             <span>· Sistem Informasi & Monitoring Siswa Sekolah</span>
           </div>
 
-          <div className="flex items-center gap-4 text-[11px]">
+          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[11px]">
             <span>Bantuan: Hubungi Staf Tata Usaha Sekolah</span>
             <span>·</span>
             <span>© 2026 Hak Cipta Dilindungi</span>
+            <span>·</span>
+            <span>Dibuat oleh <strong className="font-semibold text-slate-700">Moch Razka Putra Setiana</strong></span>
           </div>
         </div>
       </footer>
