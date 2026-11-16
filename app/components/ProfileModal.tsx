@@ -26,6 +26,7 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [loading, setLoading] = useState(false);
+  const [checkingImage, setCheckingImage] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
@@ -52,53 +53,197 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
     .join('')
     .toUpperCase();
 
+  // Heuristik piksel YCbCr + RGB untuk mendeteksi eksposur kulit berlebih / 18+ (fallback klien)
+  const analyzeCanvasNudityHeuristic = (
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number
+  ): boolean => {
+    const { data } = ctx.getImageData(0, 0, width, height);
+    let totalPixels = 0;
+    let skinPixels = 0;
+    let lowerTorsoPixels = 0;
+    let lowerTorsoSkinPixels = 0;
+    let centerPixels = 0;
+    let centerSkinPixels = 0;
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4;
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
+
+        // Konversi RGB ke YCbCr untuk deteksi warna kulit manusia
+        const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+        const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+
+        const isRgbSkin =
+          r > 95 &&
+          g > 40 &&
+          b > 20 &&
+          Math.max(r, g, b) - Math.min(r, g, b) > 15 &&
+          Math.abs(r - g) > 15 &&
+          r > g &&
+          r > b;
+        const isYCbCrSkin = cr >= 135 && cr <= 175 && cb >= 80 && cb <= 125;
+        const isSkin = isRgbSkin && isYCbCrSkin;
+
+        totalPixels++;
+        if (isSkin) skinPixels++;
+
+        // Zona tengah tubuh (x: 20%..80%, y: 30%..85%)
+        if (x >= width * 0.2 && x <= width * 0.8 && y >= height * 0.3 && y <= height * 0.85) {
+          centerPixels++;
+          if (isSkin) centerSkinPixels++;
+        }
+
+        // Zona batang tubuh bawah (x: 20%..80%, y: 55%..95%) — pada foto profil sopan area ini tertutup pakaian
+        if (x >= width * 0.2 && x <= width * 0.8 && y >= height * 0.55 && y <= height * 0.95) {
+          lowerTorsoPixels++;
+          if (isSkin) lowerTorsoSkinPixels++;
+        }
+      }
+    }
+
+    const overallSkinRatio = totalPixels > 0 ? skinPixels / totalPixels : 0;
+    const centerSkinRatio = centerPixels > 0 ? centerSkinPixels / centerPixels : 0;
+    const lowerTorsoSkinRatio =
+      lowerTorsoPixels > 0 ? lowerTorsoSkinPixels / lowerTorsoPixels : 0;
+
+    // Jika eksposur kulit di area tubuh bawah & tengah sangat dominan (>58% seluruh frame dan >68% area bawah)
+    return (
+      (overallSkinRatio > 0.58 && lowerTorsoSkinRatio > 0.68) ||
+      (centerSkinRatio > 0.75 && lowerTorsoSkinRatio > 0.72)
+    );
+  };
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
       setErrorMsg('Format file harus berupa gambar (JPG, PNG, atau WEBP).');
+      if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
 
     if (file.size > 3 * 1024 * 1024) {
       setErrorMsg('Ukuran file terlalu besar. Maksimal 3 MB.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    // Filter nama file yang mengandung kata kunci 18+ / tidak senonoh
+    const nsfwNamePattern =
+      /\b(nsfw|porn|xxx|nude|naked|sex|hentai|boobs|tits|ass|dick|pussy|bokep|bugil|telanjang|18\+|onlyfans|erotic|lewd)\b/i;
+    if (nsfwNamePattern.test(file.name)) {
+      setErrorMsg(
+        'Foto ditolak: Nama atau konten file terdeteksi mengandung unsur 18+ / tidak senonoh.'
+      );
+      if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
 
     setErrorMsg('');
+    setSuccessMsg('');
+    setCheckingImage(true);
+
     const reader = new FileReader();
     reader.onload = () => {
       const img = new Image();
-      img.onload = () => {
-        // Resize to max 400x400 to keep database payload light and fast
-        const canvas = document.createElement('canvas');
-        const maxDim = 400;
-        let width = img.width;
-        let height = img.height;
+      img.onload = async () => {
+        try {
+          // Resize to max 400x400 to keep database payload light and fast
+          const canvas = document.createElement('canvas');
+          const maxDim = 400;
+          let width = img.width;
+          let height = img.height;
 
-        if (width > height) {
-          if (width > maxDim) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
+          if (width > height) {
+            if (width > maxDim) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            }
+          } else {
+            if (height > maxDim) {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
           }
-        } else {
-          if (height > maxDim) {
-            width = Math.round((width * maxDim) / height);
-            height = maxDim;
-          }
-        }
 
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            setCheckingImage(false);
+            return;
+          }
+
           ctx.drawImage(img, 0, 0, width, height);
           const compressed = canvas.toDataURL('image/jpeg', 0.85);
+          const flaggedByHeuristic = analyzeCanvasNudityHeuristic(ctx, width, height);
+
+          // Panggil API moderasi AI Vision untuk pemeriksaan konten 18+ / tidak senonoh
+          try {
+            const res = await fetch('/api/moderate-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                imageBase64: compressed,
+                fileName: file.name,
+              }),
+            });
+
+            if (res.ok) {
+              const modResult = await res.json();
+              if (modResult.safe === false) {
+                setErrorMsg(
+                  modResult.reason ||
+                    'Foto ditolak: Terdeteksi konten tidak senonoh / 18+. Gunakan foto profil yang sopan.'
+                );
+                if (fileInputRef.current) fileInputRef.current.value = '';
+                return;
+              }
+              // Jika AI tidak aktif (aiChecked === false), gunakan hasil heuristik piksel klien
+              if (!modResult.aiChecked && flaggedByHeuristic) {
+                setErrorMsg(
+                  'Foto ditolak: Terdeteksi eksposur kulit berlebih / indikasi konten 18+. Gunakan foto profil formal dan sopan.'
+                );
+                if (fileInputRef.current) fileInputRef.current.value = '';
+                return;
+              }
+            } else if (flaggedByHeuristic) {
+              setErrorMsg(
+                'Foto ditolak: Terdeteksi indikasi konten tidak senonoh / 18+. Gunakan foto profil yang sopan.'
+              );
+              if (fileInputRef.current) fileInputRef.current.value = '';
+              return;
+            }
+          } catch {
+            if (flaggedByHeuristic) {
+              setErrorMsg(
+                'Foto ditolak: Terdeteksi indikasi konten tidak senonoh / 18+. Gunakan foto profil yang sopan.'
+              );
+              if (fileInputRef.current) fileInputRef.current.value = '';
+              return;
+            }
+          }
+
           setAvatar(compressed);
+        } finally {
+          setCheckingImage(false);
         }
       };
+      img.onerror = () => {
+        setCheckingImage(false);
+        setErrorMsg('Gagal memuat file gambar.');
+      };
       img.src = reader.result as string;
+    };
+    reader.onerror = () => {
+      setCheckingImage(false);
+      setErrorMsg('Gagal membaca file gambar.');
     };
     reader.readAsDataURL(file);
   };
@@ -217,9 +362,14 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
 
             {/* Avatar Action Buttons */}
             <div className="flex-1 text-center sm:text-left space-y-2">
-              <p className="text-xs font-semibold text-slate-800">Foto Profil</p>
+              <div className="flex items-center justify-center sm:justify-start gap-2">
+                <p className="text-xs font-semibold text-slate-800">Foto Profil</p>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-[10px] font-medium text-blue-700">
+                  <Shield className="w-2.5 h-2.5" /> Filter 18+ Aktif
+                </span>
+              </div>
               <p className="text-[11px] text-slate-500">
-                Pilih foto formal atau foto wajah yang jelas. Maks. 3MB.
+                Pilih foto formal atau wajah yang sopan (Maks. 3MB). Konten tidak senonoh / 18+ otomatis diblokir.
               </p>
               <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-1">
                 <input
@@ -231,13 +381,23 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                 />
                 <button
                   type="button"
+                  disabled={checkingImage}
                   onClick={() => fileInputRef.current?.click()}
-                  className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-medium hover:bg-slate-800 transition-colors flex items-center gap-1.5"
+                  className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-medium hover:bg-slate-800 disabled:opacity-60 transition-colors flex items-center gap-1.5"
                 >
-                  <Camera className="w-3.5 h-3.5" />
-                  {avatar ? 'Ganti Foto' : 'Unggah Foto'}
+                  {checkingImage ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Memeriksa Foto...
+                    </>
+                  ) : (
+                    <>
+                      <Camera className="w-3.5 h-3.5" />
+                      {avatar ? 'Ganti Foto' : 'Unggah Foto'}
+                    </>
+                  )}
                 </button>
-                {avatar && (
+                {avatar && !checkingImage && (
                   <button
                     type="button"
                     onClick={handleRemoveAvatar}
@@ -454,7 +614,7 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
             </button>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || checkingImage}
               className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all disabled:opacity-50 flex items-center gap-2 shadow-sm"
             >
               {loading ? (
