@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: 'standalone',
+  // 'standalone' hanya untuk Docker; Vercel memakai output bawaannya sendiri
+  ...(process.env.VERCEL ? {} : { output: 'standalone' as const }),
   env: {
     // Kaitkan variabel lingkungan sesuai fungsi API masing-masing
     NEXT_PUBLIC_SUPABASE_URL:
