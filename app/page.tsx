@@ -663,7 +663,7 @@ export default function LoginPage() {
               </p>
 
               {/* 4 Fitur Unggulan Sistem */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <div className="grid grid-cols-2 gap-2.5 sm:gap-3 pt-1">
                 {[
                   {
                     icon: Bot,
@@ -688,19 +688,21 @@ export default function LoginPage() {
                 ].map((item, idx) => (
                   <div
                     key={idx}
-                    className="feature-card p-3.5 rounded-xl border shadow-xs"
+                    className="feature-card p-2.5 sm:p-3.5 rounded-xl border shadow-xs flex flex-col justify-between"
                   >
-                    <div className="flex items-center gap-2.5 mb-1.5">
-                      <div className="feature-icon-box w-7 h-7 rounded-lg border flex items-center justify-center flex-shrink-0">
-                        <item.icon className="w-3.5 h-3.5" />
+                    <div>
+                      <div className="flex items-center gap-2 sm:gap-2.5 mb-1.5">
+                        <div className="feature-icon-box w-6 h-6 sm:w-7 sm:h-7 rounded-lg border flex items-center justify-center flex-shrink-0">
+                          <item.icon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                        </div>
+                        <h3 className="feature-title text-[11px] sm:text-xs font-bold leading-tight">
+                          {item.title}
+                        </h3>
                       </div>
-                      <h3 className="feature-title text-xs font-bold leading-tight">
-                        {item.title}
-                      </h3>
+                      <p className="feature-desc text-[10px] sm:text-[11px] leading-snug sm:leading-relaxed font-normal">
+                        {item.desc}
+                      </p>
                     </div>
-                    <p className="feature-desc text-[11px] leading-relaxed font-normal">
-                      {item.desc}
-                    </p>
                   </div>
                 ))}
               </div>
